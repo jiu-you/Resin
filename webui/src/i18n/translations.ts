@@ -633,6 +633,21 @@ Note: Once enabled, requests without authentication information are rejected ins
   "禁用请求失败熔断": "Disable request failure circuit breaker",
   "开启后，此平台的代理请求失败不会增加节点熔断计数；主动探测不受影响。":
     "When enabled, proxy request failures from this platform do not increase node circuit-breaker counts; active probes are unchanged.",
+  "Google 送中检测": "Google regional redirect check",
+  "启用 Google 送中检测": "Enable Google regional redirect check",
+  "Google 自动检测间隔": "Google automatic check interval",
+  "自动检测间隔不能为空": "Automatic check interval is required",
+  "支持 Go 时长格式，最短 1m，例如 30m、6h、24h。":
+    "Uses Go duration syntax with a minimum of 1m, for example 30m, 6h, or 24h.",
+  "排除 Google 送中节点": "Exclude Google region-redirected nodes",
+  "定期检测此平台节点访问 Google 时是否被重定向到 google.cn 或 google.com.hk；检测失败不会触发节点熔断。":
+    "Periodically check whether this platform's nodes are redirected to google.cn or google.com.hk; failures do not trip the node circuit breaker.",
+  "仅从当前平台路由池排除明确判定为送中的节点；未知或检测失败的节点仍可使用。":
+    "Exclude only explicitly region-redirected nodes from this platform; unknown or failed checks remain usable.",
+  "Google 访问状态": "Google access status",
+  "送中": "Region redirected",
+  "不可用": "Unavailable",
+  "未检测": "Not checked",
   "请求日志详情": "Request log details",
   "请选择要编辑的订阅": "Please select a subscription to edit",
   "删除后该规则将不再生效。": "After deletion, this rule will no longer take effect.",

@@ -16,6 +16,7 @@ import (
 
 	"github.com/Resinat/Resin/internal/config"
 	"github.com/Resinat/Resin/internal/geoip"
+	"github.com/Resinat/Resin/internal/googlecheck"
 	"github.com/Resinat/Resin/internal/metrics"
 	"github.com/Resinat/Resin/internal/model"
 	"github.com/Resinat/Resin/internal/netutil"
@@ -35,6 +36,7 @@ type topologyRuntime struct {
 	subManager       *topology.SubscriptionManager
 	pool             *topology.GlobalNodePool
 	probeMgr         *probe.ProbeManager
+	googleCheckMgr   *googlecheck.Manager
 	scheduler        *topology.SubscriptionScheduler
 	ephemeralCleaner *topology.EphemeralCleaner
 	router           *routing.Router
@@ -287,6 +289,35 @@ func newTopologyRuntime(
 		},
 	})
 
+	googleCheckMgr := googlecheck.NewManager(googlecheck.Config{
+		Pool:        pool,
+		Timeout:     envCfg.ProbeTimeout,
+		Concurrency: 4,
+		Fetcher: func(ctx context.Context, hash node.Hash, targetURL string) (*googlecheck.Response, error) {
+			entry, ok := pool.GetEntry(hash)
+			if !ok {
+				return nil, fmt.Errorf("node not found")
+			}
+			outboundPtr := entry.Outbound.Load()
+			if outboundPtr == nil {
+				return nil, outbound.ErrOutboundNotReady
+			}
+			resp, err := netutil.HTTPGetResponseViaOutbound(ctx, *outboundPtr, targetURL, netutil.OutboundHTTPResponseOptions{
+				FollowRedirects: false,
+				MaxBodyBytes:    4096,
+				OnConnLifecycle: func(op netutil.ConnLifecycleOp) {
+					if onProbeConnLifecycle != nil {
+						onProbeConnLifecycle(op)
+					}
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+			return &googlecheck.Response{StatusCode: resp.StatusCode, Header: resp.Header}, nil
+		},
+	})
+
 	pool.SetOnNodeAdded(func(hash node.Hash) {
 		engine.MarkNodeStatic(hash.Hex())
 		outboundMgr.EnsureNodeOutbound(hash)
@@ -327,6 +358,7 @@ func newTopologyRuntime(
 		subManager:       subManager,
 		pool:             pool,
 		probeMgr:         probeMgr,
+		googleCheckMgr:   googleCheckMgr,
 		scheduler:        scheduler,
 		ephemeralCleaner: ephemeralCleaner,
 		outboundMgr:      outboundMgr,

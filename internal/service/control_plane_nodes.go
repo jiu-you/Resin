@@ -255,3 +255,49 @@ func (s *ControlPlaneService) ProbeLatency(hashStr string) (*probe.LatencyProbeR
 	}
 	return result, nil
 }
+
+// GoogleAccessResult is the API representation of a Google access check.
+type GoogleAccessResult struct {
+	Status       node.GoogleAccessStatus `json:"status"`
+	CheckedAt    string                  `json:"checked_at,omitempty"`
+	HTTPStatus   int                     `json:"http_status,omitempty"`
+	RedirectHost string                  `json:"redirect_host,omitempty"`
+	Reason       string                  `json:"reason,omitempty"`
+}
+
+func googleAccessResult(state node.GoogleAccessState) *GoogleAccessResult {
+	result := &GoogleAccessResult{
+		Status:       state.Status,
+		HTTPStatus:   state.HTTPStatus,
+		RedirectHost: state.RedirectHost,
+		Reason:       state.Reason,
+	}
+	if !state.CheckedAt.IsZero() {
+		result.CheckedAt = state.CheckedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return result
+}
+
+// CheckGoogle triggers a synchronous Google access classification.
+func (s *ControlPlaneService) CheckGoogle(hashStr string) (*GoogleAccessResult, error) {
+	h, err := node.ParseHex(hashStr)
+	if err != nil {
+		return nil, invalidArg("node_hash: invalid format")
+	}
+	if _, ok := s.Pool.GetEntry(h); !ok {
+		return nil, notFound("node not found")
+	}
+	if s.GoogleCheckMgr == nil {
+		return nil, internal("google checker unavailable", nil)
+	}
+	state, checkErr := s.GoogleCheckMgr.CheckNow(h)
+	// A completed check returns an unavailable classification together with the
+	// transport error. Expose that useful result instead of converting it to 500.
+	if state.Status != "" {
+		return googleAccessResult(state), nil
+	}
+	if checkErr != nil {
+		return nil, internal("google check failed", checkErr)
+	}
+	return googleAccessResult(state), nil
+}

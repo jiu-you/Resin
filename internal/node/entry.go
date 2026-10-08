@@ -56,6 +56,12 @@ type NodeEntry struct {
 	LastEgressUpdateAttempt          atomic.Int64
 	LatencyTable                     *LatencyTable // per-domain latency stats; nil if not initialized
 
+	// Google access classification is independent from generic node health.
+	// It is intentionally kept in memory: enabled platforms will refresh it
+	// after startup without affecting circuit-breaker counters.
+	googleAccessMu sync.RWMutex
+	googleAccess   GoogleAccessState
+
 	// Outbound instance for this node.
 	Outbound atomic.Pointer[adapter.Outbound]
 }
@@ -302,6 +308,46 @@ func (e *NodeEntry) GetRegion(geoLookup func(netip.Addr) string) string {
 		return ""
 	}
 	return geoLookup(egressIP)
+}
+
+// GoogleAccessStatus is a node's independently classified Google access state.
+type GoogleAccessStatus string
+
+const (
+	GoogleAccessUnknown     GoogleAccessStatus = "unknown"
+	GoogleAccessOK          GoogleAccessStatus = "ok"
+	GoogleAccessSentToChina GoogleAccessStatus = "sent_to_china"
+	GoogleAccessUnavailable GoogleAccessStatus = "unavailable"
+)
+
+// GoogleAccessState contains the latest Google access classification.
+type GoogleAccessState struct {
+	Status       GoogleAccessStatus
+	CheckedAt    time.Time
+	HTTPStatus   int
+	RedirectHost string
+	Reason       string
+}
+
+// SetGoogleAccessState replaces the latest Google classification.
+func (e *NodeEntry) SetGoogleAccessState(state GoogleAccessState) {
+	if state.Status == "" {
+		state.Status = GoogleAccessUnknown
+	}
+	e.googleAccessMu.Lock()
+	e.googleAccess = state
+	e.googleAccessMu.Unlock()
+}
+
+// GetGoogleAccessState returns a copy of the latest Google classification.
+func (e *NodeEntry) GetGoogleAccessState() GoogleAccessState {
+	e.googleAccessMu.RLock()
+	state := e.googleAccess
+	e.googleAccessMu.RUnlock()
+	if state.Status == "" {
+		state.Status = GoogleAccessUnknown
+	}
+	return state
 }
 
 // SetLastError sets the node's error string (thread-safe).

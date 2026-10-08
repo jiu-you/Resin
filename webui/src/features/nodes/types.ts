@@ -20,6 +20,10 @@ export type NodeSummary = {
   last_latency_probe_attempt?: string;
   last_authority_latency_probe_attempt?: string;
   last_egress_update_attempt?: string;
+  google_access_status: "unknown" | "ok" | "sent_to_china" | "unavailable";
+  google_access_checked_at?: string;
+  google_redirect_host?: string;
+  google_access_reason?: string;
   tags: NodeTag[];
 };
 
@@ -62,4 +66,12 @@ export type EgressProbeResult = {
 
 export type LatencyProbeResult = {
   latency_ewma_ms: number;
+};
+
+export type GoogleAccessResult = {
+  status: NodeSummary["google_access_status"];
+  checked_at?: string;
+  http_status?: number;
+  redirect_host?: string;
+  reason?: string;
 };

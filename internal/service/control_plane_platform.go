@@ -19,6 +19,11 @@ import (
 // Platform
 // ------------------------------------------------------------------
 
+const (
+	defaultGoogleCheckInterval = 24 * time.Hour
+	minGoogleCheckInterval     = time.Minute
+)
+
 // PlatformResponse is the API response model for a platform.
 type PlatformResponse struct {
 	ID                               string   `json:"id"`
@@ -32,12 +37,19 @@ type PlatformResponse struct {
 	ReverseProxyFixedAccountHeader   string   `json:"reverse_proxy_fixed_account_header"`
 	AllocationPolicy                 string   `json:"allocation_policy"`
 	PassiveCircuitBreakerDisabled    bool     `json:"passive_circuit_breaker_disabled"`
+	GoogleCheckEnabled               bool     `json:"google_check_enabled"`
+	GoogleRejectSentToChina          bool     `json:"google_reject_sent_to_china"`
+	GoogleCheckInterval              string   `json:"google_check_interval"`
 	UpdatedAt                        string   `json:"updated_at"`
 }
 
 func platformToResponse(p model.Platform) PlatformResponse {
 	behavior := normalizePlatformEmptyAccountBehavior(p.ReverseProxyEmptyAccountBehavior)
 	fixedHeader := normalizeHeaderFieldName(p.ReverseProxyFixedAccountHeader)
+	googleCheckInterval := time.Duration(p.GoogleCheckIntervalNs)
+	if googleCheckInterval <= 0 {
+		googleCheckInterval = defaultGoogleCheckInterval
+	}
 	return PlatformResponse{
 		ID:                               p.ID,
 		Name:                             p.Name,
@@ -50,6 +62,9 @@ func platformToResponse(p model.Platform) PlatformResponse {
 		ReverseProxyFixedAccountHeader:   fixedHeader,
 		AllocationPolicy:                 p.AllocationPolicy,
 		PassiveCircuitBreakerDisabled:    p.PassiveCircuitBreakerDisabled,
+		GoogleCheckEnabled:               p.GoogleCheckEnabled,
+		GoogleRejectSentToChina:          p.GoogleRejectSentToChina,
+		GoogleCheckInterval:              googleCheckInterval.String(),
 		UpdatedAt:                        time.Unix(0, p.UpdatedAtNs).UTC().Format(time.RFC3339Nano),
 	}
 }
@@ -76,6 +91,9 @@ type platformConfig struct {
 	ReverseProxyFixedAccountHeader   string
 	AllocationPolicy                 string
 	PassiveCircuitBreakerDisabled    bool
+	GoogleCheckEnabled               bool
+	GoogleRejectSentToChina          bool
+	GoogleCheckIntervalNs            int64
 }
 
 func normalizePlatformMissAction(raw string) string {
@@ -106,7 +124,8 @@ func (s *ControlPlaneService) defaultPlatformConfig(name string) platformConfig 
 		ReverseProxyFixedAccountHeader: normalizeHeaderFieldName(
 			s.EnvCfg.DefaultPlatformReverseProxyFixedAccountHeader,
 		),
-		AllocationPolicy: s.EnvCfg.DefaultPlatformAllocationPolicy,
+		AllocationPolicy:      s.EnvCfg.DefaultPlatformAllocationPolicy,
+		GoogleCheckIntervalNs: int64(defaultGoogleCheckInterval),
 	}
 }
 
@@ -121,6 +140,9 @@ func platformConfigFromModel(mp model.Platform) platformConfig {
 		ReverseProxyFixedAccountHeader:   normalizeHeaderFieldName(mp.ReverseProxyFixedAccountHeader),
 		AllocationPolicy:                 mp.AllocationPolicy,
 		PassiveCircuitBreakerDisabled:    mp.PassiveCircuitBreakerDisabled,
+		GoogleCheckEnabled:               mp.GoogleCheckEnabled,
+		GoogleRejectSentToChina:          mp.GoogleRejectSentToChina,
+		GoogleCheckIntervalNs:            mp.GoogleCheckIntervalNs,
 	}
 }
 
@@ -136,6 +158,9 @@ func (cfg platformConfig) toModel(id string, updatedAtNs int64) model.Platform {
 		ReverseProxyFixedAccountHeader:   cfg.ReverseProxyFixedAccountHeader,
 		AllocationPolicy:                 cfg.AllocationPolicy,
 		PassiveCircuitBreakerDisabled:    cfg.PassiveCircuitBreakerDisabled,
+		GoogleCheckEnabled:               cfg.GoogleCheckEnabled,
+		GoogleRejectSentToChina:          cfg.GoogleRejectSentToChina,
+		GoogleCheckIntervalNs:            cfg.GoogleCheckIntervalNs,
 		UpdatedAtNs:                      updatedAtNs,
 	}
 }
@@ -145,7 +170,7 @@ func (cfg platformConfig) toRuntime(id string) (*platform.Platform, error) {
 	if err != nil {
 		return nil, err
 	}
-	return platform.NewConfiguredPlatform(
+	plat := platform.NewConfiguredPlatform(
 		id,
 		cfg.Name,
 		compiledRegexFilters,
@@ -156,7 +181,11 @@ func (cfg platformConfig) toRuntime(id string) (*platform.Platform, error) {
 		cfg.ReverseProxyFixedAccountHeader,
 		cfg.AllocationPolicy,
 		cfg.PassiveCircuitBreakerDisabled,
-	), nil
+	)
+	plat.GoogleCheckEnabled = cfg.GoogleCheckEnabled
+	plat.GoogleRejectSentToChina = cfg.GoogleRejectSentToChina
+	plat.GoogleCheckIntervalNs = cfg.GoogleCheckIntervalNs
+	return plat, nil
 }
 
 func validatePlatformMissAction(raw string) *ServiceError {
@@ -247,6 +276,14 @@ func setPlatformEmptyAccountBehavior(cfg *platformConfig, behavior string) *Serv
 	return nil
 }
 
+func setPlatformGoogleCheckInterval(cfg *platformConfig, d time.Duration) *ServiceError {
+	if d < minGoogleCheckInterval {
+		return invalidArg("google_check_interval: must be >= 1m")
+	}
+	cfg.GoogleCheckIntervalNs = int64(d)
+	return nil
+}
+
 func setPlatformAllocationPolicy(cfg *platformConfig, policy string) *ServiceError {
 	if err := validatePlatformAllocationPolicy(policy); err != nil {
 		return err
@@ -256,6 +293,15 @@ func setPlatformAllocationPolicy(cfg *platformConfig, policy string) *ServiceErr
 }
 
 func validatePlatformConfig(cfg *platformConfig, validateRegionFilters bool) *ServiceError {
+	if cfg.GoogleCheckIntervalNs == 0 {
+		cfg.GoogleCheckIntervalNs = int64(defaultGoogleCheckInterval)
+	}
+	if time.Duration(cfg.GoogleCheckIntervalNs) < minGoogleCheckInterval {
+		return invalidArg("google_check_interval: must be >= 1m")
+	}
+	if cfg.GoogleRejectSentToChina && !cfg.GoogleCheckEnabled {
+		return invalidArg("google_reject_sent_to_china: requires google_check_enabled=true")
+	}
 	if validateRegionFilters {
 		if err := platform.ValidateRegionFilters(cfg.RegionFilters); err != nil {
 			return invalidArg(err.Error())
@@ -334,6 +380,9 @@ type CreatePlatformRequest struct {
 	ReverseProxyFixedAccountHeader   *string  `json:"reverse_proxy_fixed_account_header"`
 	AllocationPolicy                 *string  `json:"allocation_policy"`
 	PassiveCircuitBreakerDisabled    *bool    `json:"passive_circuit_breaker_disabled"`
+	GoogleCheckEnabled               *bool    `json:"google_check_enabled"`
+	GoogleRejectSentToChina          *bool    `json:"google_reject_sent_to_china"`
+	GoogleCheckInterval              *string  `json:"google_check_interval"`
 }
 
 // CreatePlatform creates a new platform.
@@ -391,6 +440,21 @@ func (s *ControlPlaneService) CreatePlatform(req CreatePlatformRequest) (*Platfo
 	if req.PassiveCircuitBreakerDisabled != nil {
 		cfg.PassiveCircuitBreakerDisabled = *req.PassiveCircuitBreakerDisabled
 	}
+	if req.GoogleCheckEnabled != nil {
+		cfg.GoogleCheckEnabled = *req.GoogleCheckEnabled
+	}
+	if req.GoogleRejectSentToChina != nil {
+		cfg.GoogleRejectSentToChina = *req.GoogleRejectSentToChina
+	}
+	if req.GoogleCheckInterval != nil {
+		d, err := time.ParseDuration(*req.GoogleCheckInterval)
+		if err != nil {
+			return nil, invalidArg("google_check_interval: " + err.Error())
+		}
+		if err := setPlatformGoogleCheckInterval(&cfg, d); err != nil {
+			return nil, err
+		}
+	}
 	if err := validatePlatformConfig(&cfg, true); err != nil {
 		return nil, err
 	}
@@ -406,6 +470,9 @@ func (s *ControlPlaneService) CreatePlatform(req CreatePlatformRequest) (*Platfo
 	// a newly created platform with an empty view.
 	s.Pool.RebuildPlatform(plat)
 	s.Pool.RegisterPlatform(plat)
+	if s.GoogleCheckMgr != nil {
+		s.GoogleCheckMgr.TriggerScan()
+	}
 
 	r := s.withRoutableNodeCount(platformToResponse(mp))
 	return &r, nil
@@ -508,6 +575,23 @@ func (s *ControlPlaneService) UpdatePlatform(id string, patchJSON json.RawMessag
 	} else if ok {
 		cfg.PassiveCircuitBreakerDisabled = disabled
 	}
+	if enabled, ok, err := patch.optionalBool("google_check_enabled"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.GoogleCheckEnabled = enabled
+	}
+	if reject, ok, err := patch.optionalBool("google_reject_sent_to_china"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.GoogleRejectSentToChina = reject
+	}
+	if d, ok, err := patch.optionalDurationString("google_check_interval"); err != nil {
+		return nil, err
+	} else if ok {
+		if err := setPlatformGoogleCheckInterval(&cfg, d); err != nil {
+			return nil, err
+		}
+	}
 	if err := validatePlatformConfig(&cfg, regionFiltersPatched); err != nil {
 		return nil, err
 	}
@@ -520,6 +604,9 @@ func (s *ControlPlaneService) UpdatePlatform(id string, patchJSON json.RawMessag
 	// Replace in topology pool.
 	if err := s.Pool.ReplacePlatform(plat); err != nil {
 		return nil, internal("replace platform in pool", err)
+	}
+	if s.GoogleCheckMgr != nil {
+		s.GoogleCheckMgr.TriggerScan()
 	}
 
 	r := s.withRoutableNodeCount(platformToResponse(mp))
@@ -561,6 +648,9 @@ func (s *ControlPlaneService) ResetPlatformToDefault(id string) (*PlatformRespon
 	if err := s.Pool.ReplacePlatform(plat); err != nil {
 		return nil, internal("replace platform in pool", err)
 	}
+	if s.GoogleCheckMgr != nil {
+		s.GoogleCheckMgr.TriggerScan()
+	}
 
 	r := s.withRoutableNodeCount(platformToResponse(mp))
 	return &r, nil
@@ -589,22 +679,26 @@ type PlatformSpecFilter struct {
 
 // NodeSummary is the API response for a node.
 type NodeSummary struct {
-	NodeHash                         string    `json:"node_hash"`
-	CreatedAt                        string    `json:"created_at"`
-	Enabled                          bool      `json:"enabled"`
-	DisplayTag                       string    `json:"display_tag,omitempty"`
-	HasOutbound                      bool      `json:"has_outbound"`
-	LastError                        string    `json:"last_error,omitempty"`
-	CircuitOpenSince                 *string   `json:"circuit_open_since"`
-	FailureCount                     int       `json:"failure_count"`
-	EgressIP                         string    `json:"egress_ip,omitempty"`
-	Region                           string    `json:"region,omitempty"`
-	LastEgressUpdate                 string    `json:"last_egress_update,omitempty"`
-	LastLatencyProbeAttempt          string    `json:"last_latency_probe_attempt,omitempty"`
-	LastAuthorityLatencyProbeAttempt string    `json:"last_authority_latency_probe_attempt,omitempty"`
-	ReferenceLatencyMs               *float64  `json:"reference_latency_ms,omitempty"`
-	LastEgressUpdateAttempt          string    `json:"last_egress_update_attempt,omitempty"`
-	Tags                             []NodeTag `json:"tags"`
+	NodeHash                         string                  `json:"node_hash"`
+	CreatedAt                        string                  `json:"created_at"`
+	Enabled                          bool                    `json:"enabled"`
+	DisplayTag                       string                  `json:"display_tag,omitempty"`
+	HasOutbound                      bool                    `json:"has_outbound"`
+	LastError                        string                  `json:"last_error,omitempty"`
+	CircuitOpenSince                 *string                 `json:"circuit_open_since"`
+	FailureCount                     int                     `json:"failure_count"`
+	EgressIP                         string                  `json:"egress_ip,omitempty"`
+	Region                           string                  `json:"region,omitempty"`
+	LastEgressUpdate                 string                  `json:"last_egress_update,omitempty"`
+	LastLatencyProbeAttempt          string                  `json:"last_latency_probe_attempt,omitempty"`
+	LastAuthorityLatencyProbeAttempt string                  `json:"last_authority_latency_probe_attempt,omitempty"`
+	ReferenceLatencyMs               *float64                `json:"reference_latency_ms,omitempty"`
+	LastEgressUpdateAttempt          string                  `json:"last_egress_update_attempt,omitempty"`
+	GoogleAccessStatus               node.GoogleAccessStatus `json:"google_access_status"`
+	GoogleAccessCheckedAt            string                  `json:"google_access_checked_at,omitempty"`
+	GoogleRedirectHost               string                  `json:"google_redirect_host,omitempty"`
+	GoogleAccessReason               string                  `json:"google_access_reason,omitempty"`
+	Tags                             []NodeTag               `json:"tags"`
 }
 
 // IsHealthyAndEnabled follows the node-summary health rule used by API/UI
@@ -668,6 +762,13 @@ func (s *ControlPlaneService) nodeEntryToSummary(h node.Hash, entry *node.NodeEn
 	if lastEgressAttempt := entry.LastEgressUpdateAttempt.Load(); lastEgressAttempt > 0 {
 		ns.LastEgressUpdateAttempt = time.Unix(0, lastEgressAttempt).UTC().Format(time.RFC3339Nano)
 	}
+	googleState := entry.GetGoogleAccessState()
+	ns.GoogleAccessStatus = googleState.Status
+	if !googleState.CheckedAt.IsZero() {
+		ns.GoogleAccessCheckedAt = googleState.CheckedAt.UTC().Format(time.RFC3339Nano)
+	}
+	ns.GoogleRedirectHost = googleState.RedirectHost
+	ns.GoogleAccessReason = googleState.Reason
 
 	// Build tags.
 	subIDs := entry.SubscriptionIDs()

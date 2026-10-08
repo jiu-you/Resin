@@ -347,6 +347,11 @@ func (a *resinApp) startBackgroundServices() {
 	a.topoRuntime.probeMgr.Start()
 	log.Println("Probe manager started (batch 2)")
 
+	if a.topoRuntime.googleCheckMgr != nil {
+		a.topoRuntime.googleCheckMgr.Start()
+		log.Println("Google access checker started (batch 2)")
+	}
+
 	a.requestlogSvc.Start()
 	log.Println("Request log service started (batch 2)")
 
@@ -380,6 +385,7 @@ func (a *resinApp) buildNetworkServers(engine *state.StateEngine) error {
 		Scheduler:      a.topoRuntime.scheduler,
 		Router:         a.topoRuntime.router,
 		ProbeMgr:       a.topoRuntime.probeMgr,
+		GoogleCheckMgr: a.topoRuntime.googleCheckMgr,
 		GeoIP:          a.geoSvc,
 		MatcherRuntime: a.accountMatcher,
 	}
@@ -566,6 +572,11 @@ func (a *resinApp) shutdown(ctx context.Context) {
 
 	a.topoRuntime.scheduler.Stop()
 	log.Println("Subscription scheduler stopped")
+
+	if a.topoRuntime.googleCheckMgr != nil {
+		a.topoRuntime.googleCheckMgr.Stop()
+		log.Println("Google access checker stopped")
+	}
 
 	a.topoRuntime.probeMgr.Stop()
 	log.Println("Probe manager stopped")

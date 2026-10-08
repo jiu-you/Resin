@@ -15,6 +15,9 @@ type Platform struct {
 	ReverseProxyFixedAccountHeader   string `json:"reverse_proxy_fixed_account_header"`
 	AllocationPolicy                 string `json:"allocation_policy"`
 	PassiveCircuitBreakerDisabled    bool   `json:"passive_circuit_breaker_disabled"`
+	GoogleCheckEnabled               bool   `json:"google_check_enabled"`
+	GoogleRejectSentToChina          bool   `json:"google_reject_sent_to_china"`
+	GoogleCheckIntervalNs            int64  `json:"google_check_interval_ns"`
 	UpdatedAtNs                      int64  `json:"updated_at_ns"`
 }
 

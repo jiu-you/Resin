@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { AlertTriangle, ArrowLeft, Info, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -126,7 +126,14 @@ export function PlatformDetailPage() {
     resolver: zodResolver(platformFormSchema),
     defaultValues: defaultPlatformFormValues,
   });
-  const detailEmptyAccountBehavior = editForm.watch("reverse_proxy_empty_account_behavior");
+  const detailEmptyAccountBehavior = useWatch({
+    control: editForm.control,
+    name: "reverse_proxy_empty_account_behavior",
+  });
+  const detailGoogleCheckEnabled = useWatch({
+    control: editForm.control,
+    name: "google_check_enabled",
+  });
 
   useEffect(() => {
     if (!platform) {
@@ -471,6 +478,14 @@ export function PlatformDetailPage() {
                   <span>{t("请求失败熔断")}</span>
                   <strong>{platform.passive_circuit_breaker_disabled ? t("已关闭") : t("已开启")}</strong>
                 </span>
+                <span className="platform-fact">
+                  <span>{t("Google 送中检测")}</span>
+                  <strong>
+                    {platform.google_check_enabled
+                      ? `${t("已开启")} / ${formatGoDuration(platform.google_check_interval)}`
+                      : t("已关闭")}
+                  </strong>
+                </span>
               </div>
             </div>
           </Card>
@@ -600,6 +615,74 @@ export function PlatformDetailPage() {
                         </span>
                       </label>
                       <Switch id="detail-edit-passive-circuit-breaker" {...editForm.register("passive_circuit_breaker_disabled")} />
+                    </div>
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label" htmlFor="detail-edit-google-check" style={{ visibility: "hidden" }}>
+                      {t("启用 Google 送中检测")}
+                    </label>
+                    <div className="subscription-switch-item">
+                      <label className="subscription-switch-label" htmlFor="detail-edit-google-check">
+                        <span>{t("启用 Google 送中检测")}</span>
+                        <span
+                          className="subscription-info-icon"
+                          title={t("定期检测此平台节点访问 Google 时是否被重定向到 google.cn 或 google.com.hk；检测失败不会触发节点熔断。")}
+                          aria-label={t("定期检测此平台节点访问 Google 时是否被重定向到 google.cn 或 google.com.hk；检测失败不会触发节点熔断。")}
+                          tabIndex={0}
+                        >
+                          <Info size={13} />
+                        </span>
+                      </label>
+                      <Switch
+                        id="detail-edit-google-check"
+                        {...editForm.register("google_check_enabled", {
+                          onChange: (event) => {
+                            if (!event.target.checked) {
+                              editForm.setValue("google_reject_sent_to_china", false, { shouldValidate: true });
+                            }
+                          },
+                        })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label" htmlFor="detail-edit-google-interval">
+                      {t("Google 自动检测间隔")}
+                    </label>
+                    <Input
+                      id="detail-edit-google-interval"
+                      placeholder="24h"
+                      {...editForm.register("google_check_interval")}
+                    />
+                    <span className="field-hint">{t("支持 Go 时长格式，最短 1m，例如 30m、6h、24h。")}</span>
+                    {editForm.formState.errors.google_check_interval ? (
+                      <span className="field-error">{t(editForm.formState.errors.google_check_interval.message || "")}</span>
+                    ) : null}
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label" htmlFor="detail-edit-google-reject" style={{ visibility: "hidden" }}>
+                      {t("排除 Google 送中节点")}
+                    </label>
+                    <div className="subscription-switch-item">
+                      <label className="subscription-switch-label" htmlFor="detail-edit-google-reject">
+                        <span>{t("排除 Google 送中节点")}</span>
+                        <span
+                          className="subscription-info-icon"
+                          title={t("仅从当前平台路由池排除明确判定为送中的节点；未知或检测失败的节点仍可使用。")}
+                          aria-label={t("仅从当前平台路由池排除明确判定为送中的节点；未知或检测失败的节点仍可使用。")}
+                          tabIndex={0}
+                        >
+                          <Info size={13} />
+                        </span>
+                      </label>
+                      <Switch
+                        id="detail-edit-google-reject"
+                        disabled={!detailGoogleCheckEnabled}
+                        {...editForm.register("google_reject_sent_to_china")}
+                      />
                     </div>
                   </div>
 

@@ -130,7 +130,7 @@ func BuildFromModel(mp model.Platform) (*Platform, error) {
 		)
 	}
 
-	return NewConfiguredPlatform(
+	plat := NewConfiguredPlatform(
 		mp.ID,
 		mp.Name,
 		regexFilters,
@@ -141,5 +141,9 @@ func BuildFromModel(mp model.Platform) (*Platform, error) {
 		fixedHeader,
 		mp.AllocationPolicy,
 		mp.PassiveCircuitBreakerDisabled,
-	), nil
+	)
+	plat.GoogleCheckEnabled = mp.GoogleCheckEnabled
+	plat.GoogleRejectSentToChina = mp.GoogleRejectSentToChina
+	plat.GoogleCheckIntervalNs = mp.GoogleCheckIntervalNs
+	return plat, nil
 }

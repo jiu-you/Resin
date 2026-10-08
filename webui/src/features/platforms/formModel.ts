@@ -38,7 +38,17 @@ export const platformFormSchema = z.object({
   reverse_proxy_fixed_account_header: z.string().optional(),
   allocation_policy: z.enum(allocationPolicies),
   passive_circuit_breaker_disabled: z.boolean(),
+  google_check_enabled: z.boolean(),
+  google_reject_sent_to_china: z.boolean(),
+  google_check_interval: z.string().trim().min(1, "自动检测间隔不能为空"),
 }).superRefine((value, ctx) => {
+  if (value.google_reject_sent_to_china && !value.google_check_enabled) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["google_reject_sent_to_china"],
+      message: "排除送中节点前必须先启用 Google 送中检测",
+    });
+  }
   if (
     value.reverse_proxy_empty_account_behavior === "FIXED_HEADER" &&
     parseHeaderLines(value.reverse_proxy_fixed_account_header).length === 0
@@ -63,6 +73,9 @@ export const defaultPlatformFormValues: PlatformFormValues = {
   reverse_proxy_fixed_account_header: "Authorization",
   allocation_policy: "BALANCED",
   passive_circuit_breaker_disabled: false,
+  google_check_enabled: false,
+  google_reject_sent_to_china: false,
+  google_check_interval: "24h",
 };
 
 export function platformToFormValues(platform: Platform): PlatformFormValues {
@@ -79,6 +92,9 @@ export function platformToFormValues(platform: Platform): PlatformFormValues {
     reverse_proxy_fixed_account_header: platform.reverse_proxy_fixed_account_header,
     allocation_policy: platform.allocation_policy,
     passive_circuit_breaker_disabled: platform.passive_circuit_breaker_disabled,
+    google_check_enabled: platform.google_check_enabled,
+    google_reject_sent_to_china: platform.google_reject_sent_to_china,
+    google_check_interval: platform.google_check_interval,
   };
 }
 
@@ -92,6 +108,9 @@ function toPlatformPayloadBase(values: PlatformFormValues) {
     reverse_proxy_fixed_account_header: parseHeaderLines(values.reverse_proxy_fixed_account_header).join("\n"),
     allocation_policy: values.allocation_policy,
     passive_circuit_breaker_disabled: values.passive_circuit_breaker_disabled,
+    google_check_enabled: values.google_check_enabled,
+    google_reject_sent_to_china: values.google_reject_sent_to_china,
+    google_check_interval: values.google_check_interval.trim(),
   };
 }
 

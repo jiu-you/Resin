@@ -923,6 +923,19 @@ export function NodesPage() {
                     </p>
                   </div>
                   <div>
+                    <span>{t("Google 访问状态")}</span>
+                    <p>
+                      {detailNode.google_access_status === "ok"
+                        ? t("正常")
+                        : detailNode.google_access_status === "sent_to_china"
+                          ? t("送中")
+                          : detailNode.google_access_status === "unavailable"
+                            ? t("不可用")
+                            : t("未检测")}
+                      {detailNode.google_redirect_host ? ` (${detailNode.google_redirect_host})` : ""}
+                    </p>
+                  </div>
+                  <div>
                     <span>{t("参考延迟")}</span>
                     {(() => {
                       const latencyMs = displayableReferenceLatencyMs(detailNode);

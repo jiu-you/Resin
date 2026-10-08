@@ -211,3 +211,16 @@ func HandleProbeLatency(cp *service.ControlPlaneService) http.HandlerFunc {
 		WriteJSON(w, http.StatusOK, result)
 	}
 }
+
+// HandleCheckGoogle returns a handler for POST /api/v1/nodes/{hash}/actions/check-google.
+func HandleCheckGoogle(cp *service.ControlPlaneService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		hash := PathParam(r, "hash")
+		result, err := cp.CheckGoogle(hash)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, result)
+	}
+}

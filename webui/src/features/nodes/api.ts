@@ -1,6 +1,7 @@
 import { apiRequest } from "../../lib/api-client";
 import type {
   EgressProbeResult,
+  GoogleAccessResult,
   LatencyProbeResult,
   NodeListQuery,
   NodeSummary,
@@ -22,6 +23,10 @@ type ApiNodeSummary = Omit<NodeSummary, "tags"> & {
   last_latency_probe_attempt?: string | null;
   last_authority_latency_probe_attempt?: string | null;
   last_egress_update_attempt?: string | null;
+  google_access_status?: NodeSummary["google_access_status"] | null;
+  google_access_checked_at?: string | null;
+  google_redirect_host?: string | null;
+  google_access_reason?: string | null;
 };
 
 function normalizeNode(raw: ApiNodeSummary): NodeSummary {
@@ -39,6 +44,15 @@ function normalizeNode(raw: ApiNodeSummary): NodeSummary {
     last_latency_probe_attempt: raw.last_latency_probe_attempt || "",
     last_authority_latency_probe_attempt: raw.last_authority_latency_probe_attempt || "",
     last_egress_update_attempt: raw.last_egress_update_attempt || "",
+    google_access_status:
+      raw.google_access_status === "ok" ||
+      raw.google_access_status === "sent_to_china" ||
+      raw.google_access_status === "unavailable"
+        ? raw.google_access_status
+        : "unknown",
+    google_access_checked_at: raw.google_access_checked_at || "",
+    google_redirect_host: raw.google_redirect_host || "",
+    google_access_reason: raw.google_access_reason || "",
   };
 
   // Backend uses `omitempty`; field missing means "no reference latency".
@@ -105,6 +119,12 @@ export async function probeEgress(hash: string): Promise<EgressProbeResult> {
 
 export async function probeLatency(hash: string): Promise<LatencyProbeResult> {
   return apiRequest<LatencyProbeResult>(`${basePath}/${hash}/actions/probe-latency`, {
+    method: "POST",
+  });
+}
+
+export async function checkGoogle(hash: string): Promise<GoogleAccessResult> {
+  return apiRequest<GoogleAccessResult>(`${basePath}/${hash}/actions/check-google`, {
     method: "POST",
   });
 }
