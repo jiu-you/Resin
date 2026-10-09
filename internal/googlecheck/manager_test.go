@@ -2,16 +2,12 @@ package googlecheck
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"net/netip"
 	"testing"
 	"time"
 
 	"github.com/Resinat/Resin/internal/node"
-	"github.com/Resinat/Resin/internal/platform"
-	"github.com/Resinat/Resin/internal/subscription"
 	"github.com/Resinat/Resin/internal/testutil"
 	"github.com/Resinat/Resin/internal/topology"
 )
@@ -55,62 +51,23 @@ func TestManagerCheckNow_DoesNotAffectGenericHealth(t *testing.T) {
 	}
 }
 
-func TestManagerScan_UsesPlatformInterval(t *testing.T) {
-	subMgr := topology.NewSubscriptionManager()
-	sub := subscription.NewSubscription("sub1", "Sub1", "url", true, false)
-	subMgr.Register(sub)
+func TestManagerTrigger_CoalescesDuplicateNodes(t *testing.T) {
 	pool := topology.NewGlobalNodePool(topology.PoolConfig{
-		SubLookup:              subMgr.Lookup,
-		GeoLookup:              func(netip.Addr) string { return "us" },
 		MaxLatencyTableEntries: 16,
 		MaxConsecutiveFailures: func() int { return 3 },
 	})
-	raw := json.RawMessage(`{"type":"google-interval"}`)
-	hash := node.HashFromRawOptions(raw)
-	managed := subscription.NewManagedNodes()
-	managed.StoreNode(hash, subscription.ManagedNode{Tags: []string{"node"}})
-	sub.SwapManagedNodes(managed)
-	pool.AddNodeFromSub(hash, raw, "sub1")
-	entry, ok := pool.GetEntry(hash)
-	if !ok {
-		t.Fatal("node missing")
-	}
-	outbound := testutil.NewNoopOutbound()
-	entry.Outbound.Store(&outbound)
-	entry.CircuitOpenSince.Store(0)
-	entry.SetEgressIP(netip.MustParseAddr("203.0.113.10"))
-	entry.LatencyTable.LoadEntry("google.com", node.DomainLatencyStats{
-		Ewma:        50 * time.Millisecond,
-		LastUpdated: time.Now(),
+	hash := node.HashFromRawOptions([]byte(`{"type":"google-trigger"}`))
+	mgr := NewManager(Config{
+		Pool: pool,
+		Fetcher: func(context.Context, node.Hash, string) (*Response, error) {
+			return &Response{StatusCode: http.StatusOK, Header: make(http.Header)}, nil
+		},
 	})
-	entry.SetGoogleAccessState(node.GoogleAccessState{
-		Status:    node.GoogleAccessOK,
-		CheckedAt: time.Now().Add(-2 * time.Hour),
-	})
-
-	plat := platform.NewPlatform("p1", "P1", nil, nil)
-	plat.GoogleCheckEnabled = true
-	plat.GoogleCheckIntervalNs = int64(3 * time.Hour)
-	pool.RebuildPlatform(plat)
-	pool.RegisterPlatform(plat)
-
-	mgr := NewManager(Config{Pool: pool, Fetcher: func(context.Context, node.Hash, string) (*Response, error) {
-		return &Response{StatusCode: http.StatusOK, Header: make(http.Header)}, nil
-	}})
-	mgr.scan()
-	if got := len(mgr.queue); got != 0 {
-		t.Fatalf("3h interval should not enqueue a 2h-old result, queue=%d", got)
+	if !mgr.Trigger(hash) || !mgr.Trigger(hash) {
+		t.Fatal("trigger should accept a configured manager")
 	}
-
-	next := platform.NewPlatform("p1", "P1", nil, nil)
-	next.GoogleCheckEnabled = true
-	next.GoogleCheckIntervalNs = int64(time.Hour)
-	if err := pool.ReplacePlatform(next); err != nil {
-		t.Fatalf("replace platform: %v", err)
-	}
-	mgr.scan()
 	if got := len(mgr.queue); got != 1 {
-		t.Fatalf("1h interval should enqueue a 2h-old result, queue=%d", got)
+		t.Fatalf("duplicate triggers should coalesce, queue=%d", got)
 	}
 }
 

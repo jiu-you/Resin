@@ -1,3 +1,1 @@
-ALTER TABLE platforms ADD COLUMN google_check_enabled INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE platforms ADD COLUMN google_reject_sent_to_china INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE platforms ADD COLUMN google_check_interval_ns INTEGER NOT NULL DEFAULT 86400000000000;

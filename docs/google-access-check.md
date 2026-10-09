@@ -1,16 +1,16 @@
-# Platform-scoped Google regional redirect checks
+# Google regional redirect checks
 
-This fork adds an optional Google access classifier without coupling it to Resin's generic node-health circuit breaker.
+This fork adds a node-level Google access classifier without coupling it to Resin's generic node-health circuit breaker.
 
-## Platform settings
+## Detection lifecycle
 
-The platform detail configuration page exposes two persisted settings:
+A successful egress IP/region probe submits the same node to an independent Google-check queue. This applies to:
 
-- `google_check_enabled`: periodically classify nodes currently eligible for the platform.
-- `google_check_interval`: per-platform automatic check interval in Go duration syntax; default `24h`, minimum `1m`.
-- `google_reject_sent_to_china`: exclude nodes classified as `sent_to_china` from this platform only.
+- the immediate egress probe for a newly added or re-enabled node;
+- scheduled egress probes controlled by `max_egress_test_interval`;
+- manual egress probes.
 
-The rejection setting requires checking to be enabled. Existing and newly created platforms default both switches to `false` and the interval to `24h`.
+The Google workers are independent from ProbeManager workers. Google latency, rate limits, or failures therefore do not block egress probing, increment `FailureCount`, or open the generic circuit breaker. Duplicate queued/running checks for the same node are coalesced.
 
 ## Classification
 
@@ -21,13 +21,19 @@ The checker requests `https://www.google.com/` through the node with automatic r
 - Transport failure, unexpected status, or unrelated redirect: `unavailable`
 - Not checked yet: `unknown`
 
-Only `sent_to_china` is eligible for platform-local exclusion. `unknown` and `unavailable` remain routable. Google failures never increment `FailureCount` and never open the generic node circuit breaker.
-
-Results are kept in memory and refreshed according to each enabled platform's interval. If a node belongs to multiple enabled platforms, the shortest applicable interval wins. After restart, enabled platforms classify their eligible nodes again. The node API includes the latest status, timestamp, redirect host, and reason. A manual check is also available:
+Results are kept in memory. The node API and node list include the latest status, timestamp, redirect host, and reason. A manual Google-only check is also available:
 
 ```http
 POST /api/v1/nodes/{hash}/actions/check-google
 ```
+
+## Platform setting
+
+Platforms expose only one persisted policy:
+
+- `google_reject_sent_to_china`: exclude nodes classified as `sent_to_china` from this platform.
+
+The classification is global per node, while rejection is platform-local. `unknown` and `unavailable` nodes remain routable, and another platform with rejection disabled can continue using the same node.
 
 ## Keeping the fork easy to rebase
 
@@ -39,12 +45,6 @@ git fetch upstream
 git switch -c feature/google-cn-detection
 ```
 
-Recommended commit split:
-
-1. Google classifier and outbound response metadata helper.
-2. Platform persistence, filtering, API, and migrations.
-3. Web UI configuration and status display.
-
 To update from upstream:
 
 ```bash
@@ -55,4 +55,4 @@ git switch feature/google-cn-detection
 git rebase master
 ```
 
-Most implementation is isolated in `internal/googlecheck/` and `internal/netutil/outbound_http_response.go`. Existing upstream files contain only model propagation, lifecycle wiring, API routing, and UI fields.
+Most implementation is isolated in `internal/googlecheck/` and `internal/netutil/outbound_http_response.go`. Existing upstream files contain only lifecycle wiring, the egress-success callback, model propagation, API routing, and UI fields.

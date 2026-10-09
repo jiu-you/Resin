@@ -103,9 +103,7 @@ var platformPatchAllowedFields = map[string]bool{
 	"reverse_proxy_fixed_account_header":   true,
 	"allocation_policy":                    true,
 	"passive_circuit_breaker_disabled":     true,
-	"google_check_enabled":                 true,
 	"google_reject_sent_to_china":          true,
-	"google_check_interval":                true,
 }
 
 var subscriptionPatchAllowedFields = map[string]bool{

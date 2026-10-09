@@ -564,6 +564,28 @@ export function NodesPage() {
       },
     }),
     col.display({
+      id: "google_access_status",
+      header: t("Google 状态"),
+      cell: (info) => {
+        const node = info.row.original;
+        const title = [
+          node.google_access_checked_at ? formatDateTime(node.google_access_checked_at) : "",
+          node.google_redirect_host || "",
+          node.google_access_reason || "",
+        ].filter(Boolean).join(" · ");
+        if (node.google_access_status === "ok") {
+          return <Badge variant="success" title={title}>{t("正常")}</Badge>;
+        }
+        if (node.google_access_status === "sent_to_china") {
+          return <Badge variant="danger" title={title}>{t("送中")}</Badge>;
+        }
+        if (node.google_access_status === "unavailable") {
+          return <Badge variant="warning" title={title}>{t("不可用")}</Badge>;
+        }
+        return <Badge variant="muted" title={title}>{t("未检测")}</Badge>;
+      },
+    }),
+    col.display({
       id: "reference_latency_ms",
       header: t("参考延迟"),
       cell: (info) => {

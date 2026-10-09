@@ -16,7 +16,6 @@ func TestPlatform_GoogleSentToChinaPolicyIsPlatformLocal(t *testing.T) {
 	})
 
 	rejecting := NewPlatform("rejecting", "Rejecting", nil, nil)
-	rejecting.GoogleCheckEnabled = true
 	rejecting.GoogleRejectSentToChina = true
 	rejecting.FullRebuild(func(fn func(node.Hash, *node.NodeEntry) bool) {
 		fn(h, entry)
@@ -26,7 +25,6 @@ func TestPlatform_GoogleSentToChinaPolicyIsPlatformLocal(t *testing.T) {
 	}
 
 	permissive := NewPlatform("permissive", "Permissive", nil, nil)
-	permissive.GoogleCheckEnabled = true
 	permissive.GoogleRejectSentToChina = false
 	permissive.FullRebuild(func(fn func(node.Hash, *node.NodeEntry) bool) {
 		fn(h, entry)
@@ -46,7 +44,6 @@ func TestPlatform_GoogleUnavailableRemainsRoutable(t *testing.T) {
 	})
 
 	p := NewPlatform("p1", "Test", nil, nil)
-	p.GoogleCheckEnabled = true
 	p.GoogleRejectSentToChina = true
 	p.FullRebuild(func(fn func(node.Hash, *node.NodeEntry) bool) {
 		fn(h, entry)

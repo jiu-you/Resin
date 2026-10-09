@@ -14,9 +14,7 @@ export type Platform = {
   reverse_proxy_fixed_account_header: string;
   allocation_policy: PlatformAllocationPolicy;
   passive_circuit_breaker_disabled: boolean;
-  google_check_enabled: boolean;
   google_reject_sent_to_china: boolean;
-  google_check_interval: string;
   updated_at: string;
 };
 
@@ -37,9 +35,7 @@ export type PlatformCreateInput = {
   reverse_proxy_fixed_account_header?: string;
   allocation_policy?: PlatformAllocationPolicy;
   passive_circuit_breaker_disabled?: boolean;
-  google_check_enabled?: boolean;
   google_reject_sent_to_china?: boolean;
-  google_check_interval?: string;
 };
 
 export type PlatformUpdateInput = {
@@ -52,9 +48,7 @@ export type PlatformUpdateInput = {
   reverse_proxy_fixed_account_header?: string;
   allocation_policy?: PlatformAllocationPolicy;
   passive_circuit_breaker_disabled?: boolean;
-  google_check_enabled?: boolean;
   google_reject_sent_to_china?: boolean;
-  google_check_interval?: string;
 };
 
 export type PlatformLease = {

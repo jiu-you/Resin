@@ -10,16 +10,10 @@ import (
 	"time"
 
 	"github.com/Resinat/Resin/internal/node"
-	"github.com/Resinat/Resin/internal/platform"
-	"github.com/Resinat/Resin/internal/scanloop"
 	"github.com/Resinat/Resin/internal/topology"
 )
 
-const (
-	DefaultCheckURL  = "https://www.google.com/"
-	defaultInterval  = 24 * time.Hour
-	defaultQueueSize = 1024
-)
+const DefaultCheckURL = "https://www.google.com/"
 
 // Response is the subset of HTTP response metadata needed for classification.
 type Response struct {
@@ -35,34 +29,34 @@ type Config struct {
 	Pool        *topology.GlobalNodePool
 	Fetcher     Fetcher
 	Timeout     time.Duration
-	Interval    time.Duration
 	Concurrency int
 	CheckURL    string
 }
 
-// Manager periodically checks nodes belonging to platforms that opted in.
+// Manager executes Google checks submitted by successful egress probes.
+// Its queue and workers are independent from generic probe workers so Google
+// failures and latency cannot block or trip Resin's normal health checks.
 type Manager struct {
 	pool        *topology.GlobalNodePool
 	fetcher     Fetcher
 	timeout     time.Duration
-	interval    time.Duration
 	checkURL    string
 	workerCount int
 
-	stopCh   chan struct{}
-	stopOnce sync.Once
-	wg       sync.WaitGroup
-	queue    chan node.Hash
-	pending  sync.Map // map[node.Hash]struct{}
-	tracked  sync.Map // map[node.Hash]struct{}, keeps rejected nodes eligible for refresh
+	queueMu   sync.Mutex
+	queueCond *sync.Cond
+	queue     []node.Hash
+	queueHead int
+	stopped   bool
+	pending   sync.Map // map[node.Hash]struct{}
+
+	startOnce sync.Once
+	stopOnce  sync.Once
+	wg        sync.WaitGroup
 }
 
 // NewManager creates a Google access manager.
 func NewManager(cfg Config) *Manager {
-	interval := cfg.Interval
-	if interval <= 0 {
-		interval = defaultInterval
-	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -75,122 +69,99 @@ func NewManager(cfg Config) *Manager {
 	if checkURL == "" {
 		checkURL = DefaultCheckURL
 	}
-	return &Manager{
+	m := &Manager{
 		pool: cfg.Pool, fetcher: cfg.Fetcher, timeout: timeout,
-		interval: interval, checkURL: checkURL, workerCount: concurrency,
-		stopCh: make(chan struct{}), queue: make(chan node.Hash, max(defaultQueueSize, concurrency*4)),
+		checkURL: checkURL, workerCount: concurrency,
 	}
+	m.queueCond = sync.NewCond(&m.queueMu)
+	return m
 }
 
-// Start starts the scanner and workers.
+// Start starts the independent Google check workers.
 func (m *Manager) Start() {
 	if m == nil || m.pool == nil || m.fetcher == nil {
 		return
 	}
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		scanloop.Run(m.stopCh, scanloop.DefaultMinInterval, scanloop.DefaultJitterRange, m.scan)
-	}()
-	for i := 0; i < m.workerCount; i++ {
-		m.wg.Add(1)
-		go m.worker()
-	}
+	m.startOnce.Do(func() {
+		for i := 0; i < m.workerCount; i++ {
+			m.wg.Add(1)
+			go m.worker()
+		}
+	})
 }
 
-// Stop stops the scanner and waits for in-flight checks.
+// Stop drops queued checks and waits for in-flight checks.
 func (m *Manager) Stop() {
 	if m == nil {
 		return
 	}
-	m.stopOnce.Do(func() { close(m.stopCh) })
+	m.stopOnce.Do(func() {
+		m.queueMu.Lock()
+		m.stopped = true
+		for i := m.queueHead; i < len(m.queue); i++ {
+			m.pending.Delete(m.queue[i])
+		}
+		m.queue = nil
+		m.queueHead = 0
+		m.queueMu.Unlock()
+		m.queueCond.Broadcast()
+	})
 	m.wg.Wait()
+}
+
+// Trigger enqueues a node check without blocking the egress probe worker.
+// Duplicate queued/running checks for the same node are coalesced.
+func (m *Manager) Trigger(hash node.Hash) bool {
+	if m == nil || m.pool == nil || m.fetcher == nil {
+		return false
+	}
+	if _, loaded := m.pending.LoadOrStore(hash, struct{}{}); loaded {
+		return true
+	}
+
+	m.queueMu.Lock()
+	if m.stopped {
+		m.queueMu.Unlock()
+		m.pending.Delete(hash)
+		return false
+	}
+	m.queue = append(m.queue, hash)
+	m.queueMu.Unlock()
+	m.queueCond.Signal()
+	return true
 }
 
 func (m *Manager) worker() {
 	defer m.wg.Done()
 	for {
-		select {
-		case <-m.stopCh:
+		hash, ok := m.dequeue()
+		if !ok {
 			return
-		case hash := <-m.queue:
-			_, _ = m.CheckNow(hash)
-			m.pending.Delete(hash)
 		}
+		_, _ = m.CheckNow(hash)
+		m.pending.Delete(hash)
 	}
 }
 
-func (m *Manager) scan() {
-	if m.pool == nil {
-		return
+func (m *Manager) dequeue() (node.Hash, bool) {
+	m.queueMu.Lock()
+	defer m.queueMu.Unlock()
+	for !m.stopped && m.queueHead >= len(m.queue) {
+		m.queueCond.Wait()
 	}
-	candidates := make(map[node.Hash]time.Duration)
-	enabled := false
-	trackedInterval := time.Duration(0)
-	m.pool.RangePlatforms(func(plat *platform.Platform) bool {
-		if plat == nil || !plat.GoogleCheckEnabled {
-			return true
-		}
-		enabled = true
-		interval := time.Duration(plat.GoogleCheckIntervalNs)
-		if interval <= 0 {
-			interval = m.interval
-		}
-		if trackedInterval == 0 || interval < trackedInterval {
-			trackedInterval = interval
-		}
-		plat.View().Range(func(hash node.Hash) bool {
-			if current, ok := candidates[hash]; !ok || interval < current {
-				candidates[hash] = interval
-			}
-			return true
-		})
-		return true
-	})
-	if !enabled {
-		return
+	if m.stopped {
+		return node.Hash{}, false
 	}
-	// A rejected sent-to-China node is no longer present in platform views.
-	// Keep previously checked nodes eligible so a later clean result can restore it.
-	m.tracked.Range(func(key, _ any) bool {
-		if hash, ok := key.(node.Hash); ok {
-			if _, exists := candidates[hash]; !exists {
-				candidates[hash] = trackedInterval
-			}
-		}
-		return true
-	})
-
-	now := time.Now()
-	for hash, interval := range candidates {
-		entry, ok := m.pool.GetEntry(hash)
-		if !ok || entry == nil || !entry.HasOutbound() {
-			continue
-		}
-		last := entry.GetGoogleAccessState().CheckedAt
-		if !last.IsZero() && now.Sub(last) < interval {
-			continue
-		}
-		if _, loaded := m.pending.LoadOrStore(hash, struct{}{}); loaded {
-			continue
-		}
-		select {
-		case m.queue <- hash:
-		case <-m.stopCh:
-			m.pending.Delete(hash)
-			return
-		default:
-			m.pending.Delete(hash)
-		}
+	hash := m.queue[m.queueHead]
+	m.queueHead++
+	if m.queueHead >= len(m.queue) {
+		m.queue = nil
+		m.queueHead = 0
+	} else if m.queueHead > 1024 && m.queueHead*2 >= len(m.queue) {
+		m.queue = append([]node.Hash(nil), m.queue[m.queueHead:]...)
+		m.queueHead = 0
 	}
-}
-
-// TriggerScan asks the manager to enqueue currently eligible nodes immediately.
-func (m *Manager) TriggerScan() {
-	if m == nil {
-		return
-	}
-	m.scan()
+	return hash, true
 }
 
 // CheckNow performs a synchronous check and updates the node state.
@@ -211,7 +182,6 @@ func (m *Manager) CheckNow(hash node.Hash) (node.GoogleAccessState, error) {
 	resp, err := m.fetcher(ctx, hash, m.checkURL)
 	state := Classify(resp, err, time.Now().UTC())
 	entry.SetGoogleAccessState(state)
-	m.tracked.Store(hash, struct{}{})
 	m.pool.NotifyNodeDirty(hash)
 	return state, err
 }

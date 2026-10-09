@@ -249,6 +249,7 @@ func newTopologyRuntime(
 	}
 	outboundMgr := outbound.NewOutboundManager(pool, singboxBuilder)
 
+	var googleCheckMgr *googlecheck.Manager
 	probeMgr := probe.NewProbeManager(probe.ProbeConfig{
 		Pool:        pool,
 		Concurrency: envCfg.ProbeConcurrency,
@@ -287,9 +288,14 @@ func newTopologyRuntime(
 		LatencyAuthorities: func() []string {
 			return runtimeConfigSnapshot(runtimeCfg).LatencyAuthorities
 		},
+		OnEgressProbeSuccess: func(hash node.Hash) {
+			if googleCheckMgr != nil {
+				googleCheckMgr.Trigger(hash)
+			}
+		},
 	})
 
-	googleCheckMgr := googlecheck.NewManager(googlecheck.Config{
+	googleCheckMgr = googlecheck.NewManager(googlecheck.Config{
 		Pool:        pool,
 		Timeout:     envCfg.ProbeTimeout,
 		Concurrency: 4,

@@ -4,7 +4,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Resinat/Resin/internal/model"
 )
@@ -21,9 +20,7 @@ func TestBuildFromModel_Success(t *testing.T) {
 		ReverseProxyFixedAccountHeader:   "x-account-id",
 		AllocationPolicy:                 "PREFER_LOW_LATENCY",
 		PassiveCircuitBreakerDisabled:    true,
-		GoogleCheckEnabled:               true,
 		GoogleRejectSentToChina:          true,
-		GoogleCheckIntervalNs:            int64(6 * time.Hour),
 	}
 
 	plat, err := BuildFromModel(mp)
@@ -60,11 +57,8 @@ func TestBuildFromModel_Success(t *testing.T) {
 	if !plat.PassiveCircuitBreakerDisabled {
 		t.Fatal("passive circuit breaker flag mismatch: got false want true")
 	}
-	if !plat.GoogleCheckEnabled || !plat.GoogleRejectSentToChina {
-		t.Fatal("Google check flags were not copied to runtime platform")
-	}
-	if plat.GoogleCheckIntervalNs != int64(6*time.Hour) {
-		t.Fatalf("Google check interval: got %d want %d", plat.GoogleCheckIntervalNs, int64(6*time.Hour))
+	if !plat.GoogleRejectSentToChina {
+		t.Fatal("Google rejection flag was not copied to runtime platform")
 	}
 	if len(plat.RegexFilters.Any) != 1 || !plat.RegexFilters.Any[0].MatchString("us-node") {
 		t.Fatalf("regex filters not compiled as expected: %+v", plat.RegexFilters)

@@ -78,6 +78,33 @@ func TestProbeEgress_Success(t *testing.T) {
 	}
 }
 
+func TestProbeEgress_SuccessTriggersCapabilityChecks(t *testing.T) {
+	pool := topology.NewGlobalNodePool(topology.PoolConfig{
+		MaxLatencyTableEntries: 16,
+		MaxConsecutiveFailures: func() int { return 3 },
+	})
+	hash := node.HashFromRawOptions([]byte(`{"type":"egress-capability-hook"}`))
+	pool.AddNodeFromSub(hash, []byte(`{"type":"egress-capability-hook"}`), "sub1")
+	entry, ok := pool.GetEntry(hash)
+	if !ok {
+		t.Fatal("entry not found")
+	}
+	storeOutbound(entry)
+
+	var triggered node.Hash
+	mgr := NewProbeManager(ProbeConfig{
+		Pool: pool,
+		Fetcher: func(_ node.Hash, _ string) ([]byte, time.Duration, error) {
+			return []byte("ip=203.0.113.5\nloc=US"), 10 * time.Millisecond, nil
+		},
+		OnEgressProbeSuccess: func(got node.Hash) { triggered = got },
+	})
+	mgr.probeEgress(hash, entry)
+	if triggered != hash {
+		t.Fatalf("capability hook: got %s want %s", triggered.Hex(), hash.Hex())
+	}
+}
+
 // TestProbeEgress_Failure verifies that a failed egress probe calls
 // RecordResult(false) and accumulates failure count.
 func TestProbeEgress_Failure(t *testing.T) {

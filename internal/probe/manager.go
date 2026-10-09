@@ -44,6 +44,11 @@ type ProbeConfig struct {
 	// The kind parameter is "egress" or "latency".
 	OnProbeEvent func(kind string)
 
+	// OnEgressProbeSuccess is called after a successful egress IP/region probe.
+	// The callback must return quickly; it is intended to enqueue independent
+	// capability checks such as Google regional redirect classification.
+	OnEgressProbeSuccess func(hash node.Hash)
+
 	// ChooseNormalWhenBoth chooses whether to pop normal-priority queue when
 	// both high and normal queues are non-empty.
 	// Nil defaults to 10% chance.
@@ -68,6 +73,7 @@ type ProbeManager struct {
 	latencyTestURL                  func() string
 	latencyAuthorities              func() []string
 	onProbeEvent                    func(kind string)
+	onEgressProbeSuccess            func(hash node.Hash)
 }
 
 const (
@@ -270,6 +276,7 @@ func NewProbeManager(cfg ProbeConfig) *ProbeManager {
 		latencyTestURL:                  cfg.LatencyTestURL,
 		latencyAuthorities:              cfg.LatencyAuthorities,
 		onProbeEvent:                    cfg.OnProbeEvent,
+		onEgressProbeSuccess:            cfg.OnEgressProbeSuccess,
 	}
 }
 
@@ -800,6 +807,9 @@ func (m *ProbeManager) performEgressProbe(hash node.Hash) (netip.Addr, egressPro
 		return netip.Addr{}, egressProbeParseError, err
 	}
 	m.pool.UpdateNodeEgressIP(hash, &ip, loc)
+	if m.onEgressProbeSuccess != nil {
+		m.onEgressProbeSuccess(hash)
+	}
 	return ip, egressProbeNoError, nil
 }
 

@@ -66,14 +66,8 @@ func TestMigrateStateDB_UpgradesLegacyPlatformsColumns(t *testing.T) {
 	if ok, err := hasTableColumn(db, "platforms", "passive_circuit_breaker_disabled"); err != nil || !ok {
 		t.Fatalf("expected migrated column passive_circuit_breaker_disabled, ok=%v err=%v", ok, err)
 	}
-	if ok, err := hasTableColumn(db, "platforms", "google_check_enabled"); err != nil || !ok {
-		t.Fatalf("expected migrated column google_check_enabled, ok=%v err=%v", ok, err)
-	}
 	if ok, err := hasTableColumn(db, "platforms", "google_reject_sent_to_china"); err != nil || !ok {
 		t.Fatalf("expected migrated column google_reject_sent_to_china, ok=%v err=%v", ok, err)
-	}
-	if ok, err := hasTableColumn(db, "platforms", "google_check_interval_ns"); err != nil || !ok {
-		t.Fatalf("expected migrated column google_check_interval_ns, ok=%v err=%v", ok, err)
 	}
 	if ok, err := hasTableColumn(db, "endpoints", "enabled"); err != nil || !ok {
 		t.Fatalf("expected migrated column endpoints.enabled, ok=%v err=%v", ok, err)
@@ -460,9 +454,7 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 		RegexFilters: []string{}, RegionFilters: []string{},
 		ReverseProxyMissAction: "TREAT_AS_EMPTY", AllocationPolicy: "BALANCED",
 		PassiveCircuitBreakerDisabled: true,
-		GoogleCheckEnabled:            true,
 		GoogleRejectSentToChina:       true,
-		GoogleCheckIntervalNs:         int64(6 * time.Hour),
 		UpdatedAtNs:                   now,
 	}
 	if err := repo.UpsertPlatform(p); err != nil {
@@ -486,11 +478,8 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	if !got.PassiveCircuitBreakerDisabled {
 		t.Fatal("expected passive_circuit_breaker_disabled to round-trip true")
 	}
-	if !got.GoogleCheckEnabled || !got.GoogleRejectSentToChina {
-		t.Fatalf("expected Google check flags to round-trip true: %+v", got)
-	}
-	if got.GoogleCheckIntervalNs != int64(6*time.Hour) {
-		t.Fatalf("expected Google check interval to round-trip: got %d", got.GoogleCheckIntervalNs)
+	if !got.GoogleRejectSentToChina {
+		t.Fatalf("expected Google rejection flag to round-trip true: %+v", got)
 	}
 
 	// List.
@@ -505,9 +494,7 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	// Idempotent upsert (update same ID).
 	p.Name = "Default-Renamed"
 	p.PassiveCircuitBreakerDisabled = false
-	p.GoogleCheckEnabled = false
 	p.GoogleRejectSentToChina = false
-	p.GoogleCheckIntervalNs = int64(12 * time.Hour)
 	if err := repo.UpsertPlatform(p); err != nil {
 		t.Fatal(err)
 	}
@@ -521,11 +508,8 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	if list[0].PassiveCircuitBreakerDisabled {
 		t.Fatal("expected passive_circuit_breaker_disabled to update to false")
 	}
-	if list[0].GoogleCheckEnabled || list[0].GoogleRejectSentToChina {
-		t.Fatalf("expected Google check flags to update to false: %+v", list[0])
-	}
-	if list[0].GoogleCheckIntervalNs != int64(12*time.Hour) {
-		t.Fatalf("expected Google check interval to update: got %d", list[0].GoogleCheckIntervalNs)
+	if list[0].GoogleRejectSentToChina {
+		t.Fatalf("expected Google rejection flag to update to false: %+v", list[0])
 	}
 
 	// Delete.

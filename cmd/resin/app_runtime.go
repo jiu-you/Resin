@@ -344,13 +344,13 @@ func (a *resinApp) startBackgroundServices() {
 		a.metricsManager.OnProbeEvent(metrics.ProbeEvent{Kind: metrics.ProbeKind(kind)})
 	})
 
-	a.topoRuntime.probeMgr.Start()
-	log.Println("Probe manager started (batch 2)")
-
 	if a.topoRuntime.googleCheckMgr != nil {
 		a.topoRuntime.googleCheckMgr.Start()
 		log.Println("Google access checker started (batch 2)")
 	}
+
+	a.topoRuntime.probeMgr.Start()
+	log.Println("Probe manager started (batch 2)")
 
 	a.requestlogSvc.Start()
 	log.Println("Request log service started (batch 2)")
@@ -573,13 +573,13 @@ func (a *resinApp) shutdown(ctx context.Context) {
 	a.topoRuntime.scheduler.Stop()
 	log.Println("Subscription scheduler stopped")
 
+	a.topoRuntime.probeMgr.Stop()
+	log.Println("Probe manager stopped")
+
 	if a.topoRuntime.googleCheckMgr != nil {
 		a.topoRuntime.googleCheckMgr.Stop()
 		log.Println("Google access checker stopped")
 	}
-
-	a.topoRuntime.probeMgr.Stop()
-	log.Println("Probe manager stopped")
 
 	a.geoSvc.Stop()
 	log.Println("GeoIP service stopped")

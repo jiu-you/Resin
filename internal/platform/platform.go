@@ -40,9 +40,7 @@ type Platform struct {
 	ReverseProxyFixedAccountHeaders  []string
 	AllocationPolicy                 AllocationPolicy
 	PassiveCircuitBreakerDisabled    bool
-	GoogleCheckEnabled               bool
 	GoogleRejectSentToChina          bool
-	GoogleCheckIntervalNs            int64
 
 	// Routable view & its lock.
 	// viewMu serializes both FullRebuild and NotifyDirty.
@@ -160,8 +158,7 @@ func (p *Platform) evaluateNode(
 	// 6. Google access policy is platform-local and independent from generic
 	// node health. Unknown/unavailable nodes remain routable; only an explicit
 	// sent-to-China classification is rejected.
-	if p.GoogleCheckEnabled && p.GoogleRejectSentToChina &&
-		entry.GetGoogleAccessState().Status == node.GoogleAccessSentToChina {
+	if p.GoogleRejectSentToChina && entry.GetGoogleAccessState().Status == node.GoogleAccessSentToChina {
 		return false
 	}
 

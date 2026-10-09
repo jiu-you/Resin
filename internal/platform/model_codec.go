@@ -142,8 +142,6 @@ func BuildFromModel(mp model.Platform) (*Platform, error) {
 		mp.AllocationPolicy,
 		mp.PassiveCircuitBreakerDisabled,
 	)
-	plat.GoogleCheckEnabled = mp.GoogleCheckEnabled
 	plat.GoogleRejectSentToChina = mp.GoogleRejectSentToChina
-	plat.GoogleCheckIntervalNs = mp.GoogleCheckIntervalNs
 	return plat, nil
 }

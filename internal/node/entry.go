@@ -57,8 +57,8 @@ type NodeEntry struct {
 	LatencyTable                     *LatencyTable // per-domain latency stats; nil if not initialized
 
 	// Google access classification is independent from generic node health.
-	// It is intentionally kept in memory: enabled platforms will refresh it
-	// after startup without affecting circuit-breaker counters.
+	// It is intentionally kept in memory and refreshed after successful egress
+	// probes without affecting circuit-breaker counters.
 	googleAccessMu sync.RWMutex
 	googleAccess   GoogleAccessState
 
