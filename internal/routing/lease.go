@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/Resinat/Resin/internal/node"
+	"github.com/puzpuzpuz/xsync/v4"
 )
 
 // Lease represents a sticky routing lease.
@@ -81,6 +81,24 @@ func (t *LeaseTable) DeleteLease(account string) (Lease, bool) {
 			return oldVal, xsync.DeleteOp
 		}
 		return oldVal, xsync.CancelOp
+	})
+	return deleted, ok
+}
+
+// DeleteLeaseIfEgressIP atomically removes a lease only when it still points
+// at the expected egress IP. This prevents a concurrent route replacement
+// from being deleted by a stale Google-classification invalidation.
+func (t *LeaseTable) DeleteLeaseIfEgressIP(account string, expected netip.Addr) (Lease, bool) {
+	var deleted Lease
+	ok := false
+	t.leases.Compute(account, func(oldVal Lease, loaded bool) (Lease, xsync.ComputeOp) {
+		if !loaded || oldVal.EgressIP != expected {
+			return oldVal, xsync.CancelOp
+		}
+		t.stats.Dec(oldVal.EgressIP)
+		deleted = oldVal
+		ok = true
+		return oldVal, xsync.DeleteOp
 	})
 	return deleted, ok
 }

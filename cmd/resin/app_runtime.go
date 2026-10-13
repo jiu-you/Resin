@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -173,6 +174,16 @@ func (a *resinApp) initTopologyRuntime(engine *state.StateEngine) (*netutil.Retr
 			a.onLeaseEventForMetrics(e)
 		},
 	})
+	if a.topoRuntime.googleCheckMgr != nil {
+		a.topoRuntime.googleCheckMgr.SetActiveNodeProvider(func() []node.Hash {
+			return a.topoRuntime.router.ActiveGoogleCheckNodes(time.Now())
+		})
+		a.topoRuntime.googleCheckMgr.SetOnClassified(func(ip netip.Addr, state node.GoogleAccessState) {
+			if state.Status == node.GoogleAccessSentToChina {
+				a.topoRuntime.router.InvalidateGoogleRejectedIP(ip)
+			}
+		})
+	}
 	a.topoRuntime.leaseCleaner = routing.NewLeaseCleaner(a.topoRuntime.router)
 	log.Println("Router and LeaseCleaner initialized")
 	return retryDL, nil

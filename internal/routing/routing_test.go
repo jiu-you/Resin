@@ -202,6 +202,43 @@ func TestStickyLease_CreateAndHit(t *testing.T) {
 	}
 }
 
+func TestGoogleRejectedIP_InvalidatesLeasesOnlyForOptedInPlatform(t *testing.T) {
+	pool, subMgr := setupPool(t)
+	plat, ok := pool.GetPlatform(platID)
+	if !ok {
+		t.Fatal("platform missing")
+	}
+	plat.GoogleRejectSentToChina = true
+	hash := makeRoutableNode(t, pool, subMgr, `{"google":"lease-invalidation"}`, "10.0.0.10", "cloudflare.com", 50*time.Millisecond)
+
+	router := makeRouter(pool, nil)
+	if _, err := router.RouteRequest(platName, "google-account", "example.com"); err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+	active := router.ActiveGoogleCheckNodes(time.Now())
+	if len(active) != 1 || active[0] != hash {
+		t.Fatalf("active Google nodes: got %v want [%s]", active, hash.Hex())
+	}
+
+	if got := router.InvalidateGoogleRejectedIP(netip.MustParseAddr("10.0.0.10")); got != 1 {
+		t.Fatalf("invalidated leases: got %d want 1", got)
+	}
+	if router.DeleteLease(platID, "google-account") {
+		t.Fatal("lease should already be removed by IP invalidation")
+	}
+
+	plat.GoogleRejectSentToChina = false
+	if _, err := router.RouteRequest(platName, "permissive-account", "example.com"); err != nil {
+		t.Fatalf("create permissive lease: %v", err)
+	}
+	if got := router.InvalidateGoogleRejectedIP(netip.MustParseAddr("10.0.0.10")); got != 0 {
+		t.Fatalf("disabled platform should keep leases, removed=%d", got)
+	}
+	if !router.DeleteLease(platID, "permissive-account") {
+		t.Fatal("permissive lease should remain")
+	}
+}
+
 func TestDeleteLease_EmitsLeaseRemoveWithLifetimeFields(t *testing.T) {
 	pool, subMgr := setupPool(t)
 	makeRoutableNode(t, pool, subMgr, `{"delete":"1"}`, "10.0.0.9", "cloudflare.com", 50*time.Millisecond)

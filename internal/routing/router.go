@@ -586,6 +586,73 @@ func (r *Router) RangeLeases(platformID string, fn func(account string, lease Le
 	return true
 }
 
+// ActiveGoogleCheckNodes returns unique nodes referenced by non-expired leases
+// in platforms that reject Google region-redirected exits.
+func (r *Router) ActiveGoogleCheckNodes(now time.Time) []node.Hash {
+	seen := make(map[node.Hash]struct{})
+	r.pool.RangePlatforms(func(plat *platform.Platform) bool {
+		if plat == nil || !plat.GoogleRejectSentToChina {
+			return true
+		}
+		state, ok := r.states.Load(plat.ID)
+		if !ok {
+			return true
+		}
+		state.Leases.Range(func(_ string, lease Lease) bool {
+			if !lease.IsExpired(now) {
+				seen[lease.NodeHash] = struct{}{}
+			}
+			return true
+		})
+		return true
+	})
+
+	result := make([]node.Hash, 0, len(seen))
+	for hash := range seen {
+		result = append(result, hash)
+	}
+	return result
+}
+
+// InvalidateGoogleRejectedIP removes leases that still point to the rejected
+// egress IP, but only from platforms that enabled Google rejection.
+func (r *Router) InvalidateGoogleRejectedIP(ip netip.Addr) int {
+	if !ip.IsValid() {
+		return 0
+	}
+	count := 0
+	r.pool.RangePlatforms(func(plat *platform.Platform) bool {
+		if plat == nil || !plat.GoogleRejectSentToChina {
+			return true
+		}
+		state, ok := r.states.Load(plat.ID)
+		if !ok {
+			return true
+		}
+		state.Leases.Range(func(account string, lease Lease) bool {
+			if lease.EgressIP != ip {
+				return true
+			}
+			removed, deleted := state.Leases.DeleteLeaseIfEgressIP(account, ip)
+			if !deleted {
+				return true
+			}
+			r.emitLeaseEvent(LeaseEvent{
+				Type:        LeaseRemove,
+				PlatformID:  plat.ID,
+				Account:     account,
+				NodeHash:    removed.NodeHash,
+				EgressIP:    removed.EgressIP,
+				CreatedAtNs: removed.CreatedAtNs,
+			})
+			count++
+			return true
+		})
+		return true
+	})
+	return count
+}
+
 // DeleteLease removes a single lease by platform and account.
 // Returns true if a lease was deleted. Emits a LeaseRemove event.
 func (r *Router) DeleteLease(platformID, account string) bool {

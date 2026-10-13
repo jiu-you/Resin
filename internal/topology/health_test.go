@@ -491,7 +491,11 @@ func TestUpdateNodeEgressIP_LocStateMachine(t *testing.T) {
 		t.Fatalf("egress IP should remain on attempt-only update: got %v, want %v", got, ip)
 	}
 
-	// ip changed + loc=nil => clear region.
+	// ip changed + loc=nil => clear region and stale Google classification.
+	entry.SetGoogleAccessState(node.GoogleAccessState{
+		Status:    node.GoogleAccessSentToChina,
+		CheckedAt: time.Now(),
+	})
 	ip2 := netip.MustParseAddr("5.6.7.8")
 	pool.UpdateNodeEgressIP(h, &ip2, nil)
 	if got := entry.GetEgressRegion(); got != "" {
@@ -499,5 +503,8 @@ func TestUpdateNodeEgressIP_LocStateMachine(t *testing.T) {
 	}
 	if got := entry.GetEgressIP(); got != ip2 {
 		t.Fatalf("egress IP should update on ip change: got %v, want %v", got, ip2)
+	}
+	if got := entry.GetGoogleAccessState().Status; got != node.GoogleAccessUnknown {
+		t.Fatalf("Google status should reset after IP change: got %q", got)
 	}
 }

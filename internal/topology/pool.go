@@ -680,6 +680,9 @@ func (p *GlobalNodePool) UpdateNodeEgressIP(hash node.Hash, ip *netip.Addr, loc 
 		}
 	}
 
+	if ipChanged {
+		entry.SetGoogleAccessState(node.GoogleAccessState{Status: node.GoogleAccessUnknown})
+	}
 	if ipChanged || regionChanged {
 		p.notifyAllPlatformsDirty(hash)
 	}

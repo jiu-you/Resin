@@ -4,13 +4,15 @@ This fork adds a node-level Google access classifier without coupling it to Resi
 
 ## Detection lifecycle
 
-A successful egress IP/region probe submits the same node to an independent Google-check queue. This applies to:
+A successful egress IP/region probe submits the same node to an independent Google-check queue. Results and in-flight work are deduplicated by egress IP and shared by every node currently using that IP. This applies to:
 
 - the immediate egress probe for a newly added or re-enabled node;
 - scheduled egress probes controlled by `max_egress_test_interval`;
 - manual egress probes.
 
-The Google workers are independent from ProbeManager workers. Google latency, rate limits, or failures therefore do not block egress probing, increment `FailureCount`, or open the generic circuit breaker. Duplicate queued/running checks for the same node are coalesced.
+The Google workers are independent from ProbeManager workers. Google latency, rate limits, or failures therefore do not block egress probing, increment `FailureCount`, or open the generic circuit breaker. Duplicate queued/running checks for the same egress IP are coalesced.
+
+Additionally, egress IPs referenced by non-expired leases in platforms with `google_reject_sent_to_china=true` are refreshed every 10 minutes. Other platforms do not activate this higher-frequency path. When an IP is classified as sent to China, leases pointing to that IP are atomically removed only from opted-in platforms. A changed egress IP resets the node's previous Google classification to `unknown` before the new check runs.
 
 ## Classification
 
