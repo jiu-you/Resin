@@ -32,11 +32,12 @@ type Fetcher func(ctx context.Context, hash node.Hash, targetURL string) (*Respo
 
 // Config configures Manager.
 type Config struct {
-	Pool        *topology.GlobalNodePool
-	Fetcher     Fetcher
-	Timeout     time.Duration
-	Concurrency int
-	CheckURL    string
+	Pool           *topology.GlobalNodePool
+	EnsureOutbound func(node.Hash)
+	Fetcher        Fetcher
+	Timeout        time.Duration
+	Concurrency    int
+	CheckURL       string
 }
 
 type queueTask struct {
@@ -47,11 +48,12 @@ type queueTask struct {
 // Manager executes Google checks submitted by successful egress probes and
 // periodically refreshes IPs leased by Google-rejecting platforms.
 type Manager struct {
-	pool        *topology.GlobalNodePool
-	fetcher     Fetcher
-	timeout     time.Duration
-	checkURL    string
-	workerCount int
+	pool           *topology.GlobalNodePool
+	ensureOutbound func(node.Hash)
+	fetcher        Fetcher
+	timeout        time.Duration
+	checkURL       string
+	workerCount    int
 
 	callbackMu         sync.RWMutex
 	activeNodeProvider func() []node.Hash
@@ -86,7 +88,7 @@ func NewManager(cfg Config) *Manager {
 		checkURL = DefaultCheckURL
 	}
 	m := &Manager{
-		pool: cfg.Pool, fetcher: cfg.Fetcher, timeout: timeout,
+		pool: cfg.Pool, ensureOutbound: cfg.EnsureOutbound, fetcher: cfg.Fetcher, timeout: timeout,
 		checkURL: checkURL, workerCount: concurrency, stopCh: make(chan struct{}),
 	}
 	m.queueCond = sync.NewCond(&m.queueMu)
@@ -250,6 +252,9 @@ func (m *Manager) CheckNow(hash node.Hash) (node.GoogleAccessState, error) {
 	entry, ok := m.pool.GetEntry(hash)
 	if !ok || entry == nil {
 		return node.GoogleAccessState{}, fmt.Errorf("node not found")
+	}
+	if m.ensureOutbound != nil {
+		m.ensureOutbound(hash)
 	}
 	if !entry.HasOutbound() {
 		return node.GoogleAccessState{}, fmt.Errorf("node outbound is not ready")

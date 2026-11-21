@@ -44,11 +44,12 @@ type NodeEntry struct {
 	LastError       string
 
 	// Atomic dynamic fields for concurrent hot-path reads.
-	FailureCount     atomic.Int32
-	CircuitOpenSince atomic.Int64               // unix-nano; 0 = not open
-	egressIP         atomic.Pointer[netip.Addr] // nil before first store
-	egressRegion     atomic.Pointer[string]     // lowercase country code from probe trace; nil when unknown
-	LastEgressUpdate atomic.Int64               // unix-nano of last successful egress-IP sample
+	FailureCount      atomic.Int32
+	CircuitOpenSince  atomic.Int64               // unix-nano; 0 = not open
+	CircuitGeneration atomic.Uint64              // advances on each circuit opening; runtime only
+	egressIP          atomic.Pointer[netip.Addr] // nil before first store
+	egressRegion      atomic.Pointer[string]     // lowercase country code from probe trace; nil when unknown
+	LastEgressUpdate  atomic.Int64               // unix-nano of last successful egress-IP sample
 	// Probe-attempt timestamps (unix-nano). These are updated regardless of
 	// probe success/failure, and are used by probe schedulers.
 	LastLatencyProbeAttempt          atomic.Int64
@@ -64,6 +65,9 @@ type NodeEntry struct {
 
 	// Outbound instance for this node.
 	Outbound atomic.Pointer[adapter.Outbound]
+
+	// Routing changes are serialized by the owning pool.
+	routingState atomic.Uint64
 }
 
 // NewNodeEntry creates a NodeEntry with the given static fields.
@@ -76,6 +80,7 @@ func NewNodeEntry(hash Hash, rawOptions json.RawMessage, createdAt time.Time, ma
 		RawOptions: rawOptions,
 		CreatedAt:  createdAt,
 	}
+	e.routingState.Store(nextRoutingVersion.Add(1) << 2)
 	if maxLatencyTableEntries > 0 {
 		e.LatencyTable = NewLatencyTable(maxLatencyTableEntries)
 	}
@@ -247,7 +252,17 @@ func (e *NodeEntry) HasLatency() bool {
 
 // HasOutbound returns true if the node has a valid outbound instance.
 func (e *NodeEntry) HasOutbound() bool {
-	return e.Outbound.Load() != nil
+	ptr := e.Outbound.Load()
+	if ptr == nil {
+		return false
+	}
+	if v, ok := (*ptr).(interface{ RoutingVersion() uint64 }); ok && v.RoutingVersion() != e.RoutingVersion() {
+		return false
+	}
+	if ready, ok := (*ptr).(interface{ Ready() bool }); ok {
+		return ready.Ready()
+	}
+	return true
 }
 
 // IsHealthy returns true when the node can be treated as healthy for

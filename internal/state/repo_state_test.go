@@ -74,6 +74,91 @@ func TestMigrateStateDB_UpgradesLegacyPlatformsColumns(t *testing.T) {
 	}
 }
 
+func TestMigrateStateDB_UpgradesLegacyGoogleForkVersion10(t *testing.T) {
+	dir := t.TempDir()
+	db, err := OpenDB(dir + "/state.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Simulate an existing database from the pre-1.4 custom fork where
+	// migration 10 added platforms.google_reject_sent_to_china and
+	// subscriptions does not yet have chain_proxy / chain_relay.
+	_, err = db.Exec(`
+		CREATE TABLE schema_migrations (version uint64 NOT NULL PRIMARY KEY, dirty bool NOT NULL);
+		INSERT INTO schema_migrations (version, dirty) VALUES (10, 0);
+		CREATE TABLE subscriptions (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			source_type TEXT NOT NULL DEFAULT 'remote',
+			url TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL DEFAULT '',
+			update_interval_ns INTEGER NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			ephemeral INTEGER NOT NULL DEFAULT 0,
+			ephemeral_node_evict_delay_ns INTEGER NOT NULL DEFAULT 259200000000000,
+			created_at_ns INTEGER NOT NULL,
+			updated_at_ns INTEGER NOT NULL,
+			incremental_alive_nodes INTEGER NOT NULL DEFAULT 0
+		);
+		INSERT INTO subscriptions (
+			id, name, update_interval_ns, created_at_ns, updated_at_ns
+		) VALUES ('sub-1', 'Sub 1', 60000000000, 1, 1);
+		CREATE TABLE platforms (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			sticky_ttl_ns INTEGER NOT NULL,
+			regex_filters_json TEXT NOT NULL DEFAULT '[]',
+			region_filters_json TEXT NOT NULL DEFAULT '[]',
+			reverse_proxy_miss_action TEXT NOT NULL DEFAULT 'TREAT_AS_EMPTY',
+			reverse_proxy_empty_account_behavior TEXT NOT NULL DEFAULT 'RANDOM',
+			reverse_proxy_fixed_account_header TEXT NOT NULL DEFAULT '',
+			allocation_policy TEXT NOT NULL DEFAULT 'BALANCED',
+			passive_circuit_breaker_disabled INTEGER NOT NULL DEFAULT 0,
+			google_reject_sent_to_china INTEGER NOT NULL DEFAULT 0,
+			updated_at_ns INTEGER NOT NULL
+		);
+		INSERT INTO platforms (
+			id, name, sticky_ttl_ns, google_reject_sent_to_china, updated_at_ns
+		) VALUES ('plat-1', 'Google', 60000000000, 1, 1);
+	`)
+	if err != nil {
+		t.Fatalf("create legacy custom fork schema: %v", err)
+	}
+
+	if err := MigrateStateDB(db); err != nil {
+		t.Fatalf("MigrateStateDB: %v", err)
+	}
+
+	var version int
+	var dirty bool
+	if err := db.QueryRow("SELECT version, dirty FROM schema_migrations LIMIT 1").Scan(&version, &dirty); err != nil {
+		t.Fatalf("read schema_migrations: %v", err)
+	}
+	if dirty || version != stateLatestVersion {
+		t.Fatalf("schema_migrations: version=%d dirty=%v, want version=%d dirty=false", version, dirty, stateLatestVersion)
+	}
+
+	for _, col := range []string{"chain_proxy", "chain_relay"} {
+		if ok, err := hasTableColumn(db, "subscriptions", col); err != nil || !ok {
+			t.Fatalf("expected subscriptions.%s after upgrade, ok=%v err=%v", col, ok, err)
+		}
+	}
+
+	repo := newStateRepo(db)
+	plat, err := repo.GetPlatform("plat-1")
+	if err != nil {
+		t.Fatalf("GetPlatform: %v", err)
+	}
+	if !plat.GoogleRejectSentToChina {
+		t.Fatalf("expected google_reject_sent_to_china to remain true: %+v", plat)
+	}
+	if _, err := db.Exec("UPDATE subscriptions SET chain_proxy = 1, chain_relay = 1 WHERE id = 'sub-1'"); err == nil {
+		t.Fatal("expected CHECK constraint rejecting both chain_proxy and chain_relay")
+	}
+}
+
 func TestMigrateStateDB_AddsEnabledToExistingEndpoints(t *testing.T) {
 	dir := t.TempDir()
 	db, err := OpenDB(dir + "/state.db")
@@ -85,6 +170,7 @@ func TestMigrateStateDB_AddsEnabledToExistingEndpoints(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE schema_migrations (version uint64 NOT NULL PRIMARY KEY, dirty bool NOT NULL);
 		INSERT INTO schema_migrations (version, dirty) VALUES (7, 0);
+		CREATE TABLE subscriptions (id TEXT PRIMARY KEY);
 		CREATE TABLE platforms (
 			id TEXT PRIMARY KEY,
 			regex_filters_json TEXT NOT NULL DEFAULT '[]'
@@ -133,6 +219,7 @@ func TestMigrateStateDB_ConvertsLegacyRegexFiltersToMustRules(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE schema_migrations (version uint64 NOT NULL PRIMARY KEY, dirty bool NOT NULL);
 		INSERT INTO schema_migrations (version, dirty) VALUES (8, 0);
+		CREATE TABLE subscriptions (id TEXT PRIMARY KEY);
 		CREATE TABLE platforms (
 			id TEXT PRIMARY KEY,
 			regex_filters_json TEXT NOT NULL DEFAULT '[]'

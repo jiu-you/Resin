@@ -45,7 +45,7 @@ func HTTPGetResponseViaOutbound(
 
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			conn, err := outbound.DialContext(ctx, network, M.ParseSocksaddr(addr))
+			conn, err := outbound.DialContext(WithoutHTTPTrace(ctx), network, M.ParseSocksaddr(addr))
 			if err != nil {
 				return nil, err
 			}

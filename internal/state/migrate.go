@@ -28,11 +28,13 @@ const (
 	stateVersionAddEndpoints                     = 7
 	stateVersionAddEndpointEnabled               = 8
 	stateVersionPlatformRegexFilterRules         = 9
-	stateVersionAddPlatformGoogleCheck           = 10
+	stateVersionSubscriptionChainProxy           = 10
+	stateVersionAddPlatformGoogleCheck           = 11
 	stateLatestVersion                           = stateVersionAddPlatformGoogleCheck
 	stateLegacyBaselineVersion                   = stateVersionAddFixedAccountHeader
 
-	stateBaseSchemaMigration = stateMigrationsPath + "/000001_state_base.up.sql"
+	stateBaseSchemaMigration             = stateMigrationsPath + "/000001_state_base.up.sql"
+	stateSubscriptionChainProxyMigration = stateMigrationsPath + "/000010_subscription_chain_proxy.up.sql"
 )
 
 //go:embed migrations/state/*.sql migrations/cache/*.sql
@@ -94,7 +96,7 @@ func prepareLegacyStateBaseline(db *sql.DB, driver migratedb.Driver) error {
 		return err
 	}
 	if hasVersion {
-		return nil
+		return reconcileCustomGoogleCheckMigration(db, driver)
 	}
 
 	hasPlatforms, err := hasTable(db, "platforms")
@@ -154,6 +156,44 @@ func hasMigrationVersion(db *sql.DB, table string) (bool, error) {
 		return false, fmt.Errorf("read %s: %w", table, err)
 	}
 	return count > 0, nil
+}
+
+// reconcileCustomGoogleCheckMigration upgrades databases from earlier custom
+// builds where platforms.google_reject_sent_to_china occupied migration 10
+// before upstream introduced 000010_subscription_chain_proxy.
+func reconcileCustomGoogleCheckMigration(db *sql.DB, driver migratedb.Driver) error {
+	var version int
+	var dirty bool
+	if err := db.QueryRow(fmt.Sprintf("SELECT version, dirty FROM %s LIMIT 1", migrateDefaultTable)).Scan(&version, &dirty); err != nil {
+		return fmt.Errorf("read %s version: %w", migrateDefaultTable, err)
+	}
+	if dirty || version >= stateVersionAddPlatformGoogleCheck || version < stateVersionPlatformRegexFilterRules {
+		return nil
+	}
+
+	hasGoogleReject, err := hasTableColumn(db, "platforms", "google_reject_sent_to_china")
+	if err != nil {
+		return err
+	}
+	if !hasGoogleReject {
+		return nil
+	}
+
+	hasChainProxy, err := hasTableColumn(db, "subscriptions", "chain_proxy")
+	if err != nil {
+		return err
+	}
+	if !hasChainProxy {
+		sqlBytes, err := migrationsFS.ReadFile(stateSubscriptionChainProxyMigration)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", stateSubscriptionChainProxyMigration, err)
+		}
+		if _, err := db.Exec(string(sqlBytes)); err != nil {
+			return fmt.Errorf("apply %s: %w", stateSubscriptionChainProxyMigration, err)
+		}
+	}
+
+	return setMigrationVersion(driver, stateVersionAddPlatformGoogleCheck)
 }
 
 func setMigrationVersion(driver migratedb.Driver, version int) error {
